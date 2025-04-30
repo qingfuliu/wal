@@ -916,6 +916,7 @@ func (l *Log) truncateBack(index uint64) (err error) {
 	return nil
 }
 
+// Clear clears the log by removing all entries.
 func (l *Log) Clear() (err error) {
 	l.clearCache()
 	tempName := filepath.Join(l.path, "TEMP")
