@@ -818,7 +818,10 @@ func (l *Log) TruncateBack(index uint64) error {
 }
 
 func (l *Log) truncateBack(index uint64) (err error) {
-	if index == 0 || l.lastIndex == 0 ||
+	if index == 0 {
+		return l.Close()
+	}
+	if l.lastIndex == 0 ||
 		index < l.firstIndex || index > l.lastIndex {
 		return ErrOutOfRange
 	}
@@ -904,6 +907,63 @@ func (l *Log) truncateBack(index uint64) (err error) {
 	if err = l.loadSegmentEntries(s); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (l *Log) Clear() (err error) {
+	l.clearCache()
+	tempName := filepath.Join(l.path, "TEMP")
+	if err = func() error {
+		f, err := os.OpenFile(tempName, os.O_CREATE, l.opts.FilePerms)
+		if err != nil {
+			return err
+		}
+		return f.Close()
+	}(); err != nil {
+		return fmt.Errorf("failed to create temp file for new end segment: %w", err)
+	}
+	endName := filepath.Join(l.path, segmentName(1)+".END")
+	if err = os.Rename(tempName, endName); err != nil {
+		return err
+	}
+	// The log was truncated but still needs some file cleanup. Any errors
+	// following this message will not cause an on-disk data ocorruption, but
+	// may cause an inconsistency with the current program, so we'll return
+	// ErrCorrupt so the the user can attempt a recover by calling Close()
+	// followed by Open().
+	defer func() {
+		if v := recover(); v != nil {
+			err = ErrCorrupt
+			l.corrupt = true
+		}
+	}()
+	// Close the tail segment file
+	if err = l.sfile.Close(); err != nil {
+		return err
+	}
+	// Delete truncated segment files
+	for i := 0; i < len(l.segments); i++ {
+		if err = os.Remove(l.segments[i].path); err != nil {
+			return err
+		}
+	}
+	// Rename the END file to the final truncated segment name.
+	newName := filepath.Join(l.path, segmentName(1))
+	if err = os.Rename(endName, newName); err != nil {
+		return err
+	}
+	// Reopen the tail segment file
+	if l.sfile, err = os.OpenFile(newName, os.O_WRONLY, l.opts.FilePerms); err != nil {
+		return err
+	}
+	l.segments = []*segment{
+		&segment{
+			path:  newName,
+			index: 1,
+		},
+	}
+	l.firstIndex = 1
+	l.lastIndex = 0
 	return nil
 }
 
