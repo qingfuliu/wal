@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -173,7 +172,7 @@ func (l *Log) pushCache(segIdx int) {
 
 // load all the segments. This operation also cleans up any START/END segments.
 func (l *Log) load() error {
-	fis, err := ioutil.ReadDir(l.path)
+	fis, err := os.ReadDir(l.path)
 	if err != nil {
 		return err
 	}
@@ -530,7 +529,7 @@ func (l *Log) findSegment(index uint64) int {
 }
 
 func (l *Log) loadSegmentEntries(s *segment) error {
-	data, err := ioutil.ReadFile(s.path)
+	data, err := os.ReadFile(s.path)
 	if err != nil {
 		return err
 	}
@@ -710,6 +709,9 @@ func (l *Log) TruncateFront(index uint64) error {
 	return l.truncateFront(index)
 }
 func (l *Log) truncateFront(index uint64) (err error) {
+	if index == l.lastIndex+1 {
+		return l.Close()
+	}
 	if index == 0 || l.lastIndex == 0 ||
 		index < l.firstIndex || index > l.lastIndex {
 		return ErrOutOfRange
@@ -733,7 +735,9 @@ func (l *Log) truncateFront(index uint64) (err error) {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() {
+			_ = f.Close()
+		}()
 		if _, err := f.Write(ebuf); err != nil {
 			return err
 		}
@@ -844,7 +848,9 @@ func (l *Log) truncateBack(index uint64) (err error) {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() {
+			_ = f.Close()
+		}()
 		if _, err := f.Write(ebuf); err != nil {
 			return err
 		}
@@ -957,7 +963,7 @@ func (l *Log) Clear() (err error) {
 		return err
 	}
 	l.segments = []*segment{
-		&segment{
+		{
 			path:  newName,
 			index: 1,
 		},
